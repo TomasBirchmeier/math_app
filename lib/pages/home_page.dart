@@ -75,7 +75,9 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Obtuviste $aciertos / ${_ejercicios.length} respuestas correctas 🎯'),
+        content: Text(
+          'Obtuviste $aciertos / ${_ejercicios.length} respuestas correctas 🎯',
+        ),
         backgroundColor: Colors.indigo,
       ),
     );
@@ -208,11 +210,13 @@ class _HomePageState extends State<HomePage> {
               attempt: assetAttempt,
               formatDuration: _formatDuration,
               formatDate: _formatAttemptDate,
-              onStart: () => _launchExam((_) => ExamAssetSessionPage(
-                    examId: assetInfo.id,
-                    examTitle: assetInfo.title,
-                    questions: ensayoM1May2023,
-                  )),
+              onStart: () => _launchExam(
+                (_) => ExamAssetSessionPage(
+                  examId: assetInfo.id,
+                  examTitle: assetInfo.title,
+                  questions: ensayoM1May2023,
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             _ExamCard(
@@ -222,24 +226,31 @@ class _HomePageState extends State<HomePage> {
               attempt: paesAttempt,
               formatDuration: _formatDuration,
               formatDate: _formatAttemptDate,
-              onStart: () => _launchExam((_) => ExamTextSessionPage(
-                    examId: paesInfo.id,
-                    examTitle: paesInfo.title,
-                    questions: paesM1TextQuestions,
-                  )),
+              onStart: () => _launchExam(
+                (_) => ExamTextSessionPage(
+                  examId: paesInfo.id,
+                  examTitle: paesInfo.title,
+                  questions: paesM1TextQuestions,
+                ),
+              ),
             ),
             const SizedBox(height: 24),
             Text(
               'Recomendaciones',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-            const Text('• No cierres la aplicación mientras el ensayo está en curso.'),
-            const Text('• Marca la alternativa que consideres correcta (A, B, C o D).'),
-            const Text('• El ensayo se enviará automáticamente al agotar el tiempo.'),
+            const Text(
+              '• No cierres la aplicación mientras el ensayo está en curso.',
+            ),
+            const Text(
+              '• Marca la alternativa que consideres correcta (A, B, C o D).',
+            ),
+            const Text(
+              '• El ensayo se enviará automáticamente al agotar el tiempo.',
+            ),
           ],
         ),
       ),
@@ -343,7 +354,9 @@ class _HomePageState extends State<HomePage> {
         final esCorrecto = correcta != null && _respuestas[index] == correcta;
         return Card(
           elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -414,7 +427,9 @@ class _ExamCard extends StatelessWidget {
           children: [
             Text(
               title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 8),
             Text(description),
@@ -424,7 +439,9 @@ class _ExamCard extends StatelessWidget {
               const SizedBox(height: 12),
               Text(
                 'Último intento',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 4),
               Text('Respondidas: ${attempt!.answeredCount} / $questionCount'),
@@ -471,10 +488,8 @@ class _ResumenProgreso extends StatelessWidget {
               runSpacing: 12,
               children: AppState.topics
                   .map(
-                    (topic) => _TopicChip(
-                      topic: topic,
-                      points: progreso[topic] ?? 0,
-                    ),
+                    (topic) =>
+                        _TopicChip(topic: topic, points: progreso[topic] ?? 0),
                   )
                   .toList(),
             ),
@@ -560,7 +575,9 @@ class _ResultadoRespuesta extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        Text('Tu respuesta: ${respuestaUsuario?.isEmpty ?? true ? '—' : respuestaUsuario}'),
+        Text(
+          'Tu respuesta: ${respuestaUsuario?.isEmpty ?? true ? '—' : respuestaUsuario}',
+        ),
         Text('Respuesta correcta: $respuestaCorrecta'),
       ],
     );
