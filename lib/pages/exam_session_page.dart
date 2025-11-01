@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../data/exam_keys.dart';
 import '../data/ensayo_m1_2023.dart';
 import '../models/exam.dart';
 import '../state/app_state.dart';
+import '../utils/exam_scoring.dart';
+import '../widgets/trimmed_asset_image.dart';
 
 class ExamAssetSessionPage extends StatefulWidget {
   const ExamAssetSessionPage({
@@ -38,7 +41,10 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() {
-        _remainingSeconds = (_remainingSeconds - 1).clamp(0, _totalDurationSeconds);
+        _remainingSeconds = (_remainingSeconds - 1).clamp(
+          0,
+          _totalDurationSeconds,
+        );
       });
       if (_remainingSeconds == 0) {
         _submitExam(auto: true);
@@ -60,11 +66,18 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
   }
 
   void _goToQuestion(int index) {
+    if (!_pageController.hasClients) return;
     _pageController.animateToPage(
       index,
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 240),
       curve: Curves.easeInOut,
     );
+  }
+
+  void _advanceAfterAnswer(int currentIndex) {
+    if (currentIndex < widget.questions.length - 1) {
+      _goToQuestion(currentIndex + 1);
+    }
   }
 
   Future<void> _submitExam({bool auto = false}) async {
@@ -77,6 +90,14 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
       return;
     }
     final elapsed = DateTime.now().difference(_startedAt).inSeconds;
+    final answerKey = ExamKeys.keyFor(widget.examId);
+    final excluded = ExamKeys.excludedFor(widget.examId);
+    final result = gradeAnswers(
+      answerKey: answerKey,
+      userAnswers: _answers,
+      totalQuestions: widget.questions.length,
+      excluded: excluded,
+    );
     final attempt = ExamAttempt(
       userId: user.id,
       durationSeconds: elapsed,
@@ -99,12 +120,27 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
                 'Respuestas registradas: ${_answers.length} de ${widget.questions.length}.',
               ),
               const SizedBox(height: 8),
-              Text(
-                'Duración: ${_formatElapsed(elapsed)}.',
-              ),
+              if (result.totalGradable > 0) ...[
+                Text(
+                  'Correctas: ${result.correct} / ${result.totalGradable} (${(result.accuracy * 100).toStringAsFixed(1)}%)',
+                ),
+                if (result.excluded.isNotEmpty)
+                  Text(
+                    'Preguntas sin corrección automática: ${_formatExcluded(result.excluded)}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                const SizedBox(height: 8),
+              ] else ...[
+                Text(
+                  'Aún no hay clave cargada para este ensayo. Revisa tus respuestas con tu profesora.',
+                ),
+                const SizedBox(height: 8),
+              ],
+              Text('Duración: ${_formatElapsed(elapsed)}.'),
               const SizedBox(height: 8),
               const Text(
-                  'Tu docente podrá revisar tus respuestas desde el panel administrador.'),
+                'Tu docente podrá revisar tus respuestas desde el panel administrador.',
+              ),
             ],
           ),
           actions: [
@@ -127,7 +163,8 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
         return AlertDialog(
           title: const Text('Salir del ensayo'),
           content: const Text(
-              'Si abandonas ahora, tus respuestas no se guardarán. ¿Deseas salir?'),
+            'Si abandonas ahora, tus respuestas no se guardarán. ¿Deseas salir?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -162,6 +199,14 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
     return '${mins}m ${secs}s';
   }
 
+  String _formatExcluded(Set<int> excluded) {
+    if (excluded.isEmpty) {
+      return '';
+    }
+    final list = excluded.toList()..sort();
+    return list.join(', ');
+  }
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -194,13 +239,14 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
                   const SizedBox(width: 8),
                   Text(
                     'Tiempo restante: ${_formatRemaining(_remainingSeconds)}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w600),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const Spacer(),
-                  Text('Resueltas: ${_answers.length}/${widget.questions.length}'),
+                  Text(
+                    'Resueltas: ${_answers.length}/${widget.questions.length}',
+                  ),
                 ],
               ),
             ),
@@ -212,15 +258,16 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
                   final question = widget.questions[index];
                   final selected = _answers[question.number];
                   return SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Pregunta ${question.number} · Página ${question.page}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
+                          'Pregunta ${question.number}',
+                          style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 12),
@@ -232,20 +279,8 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(12),
-                              child: Image.asset(
-                                question.assetPath,
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stack) {
-                                  return Container(
-                                    height: 240,
-                                    alignment: Alignment.center,
-                                    color: Colors.grey[200],
-                                    child: const Text(
-                                      'No se pudo cargar la imagen del ejercicio.',
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  );
-                                },
+                              child: TrimmedAssetImage(
+                                assetPath: question.assetPath,
                               ),
                             ),
                           ),
@@ -253,9 +288,7 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
                         const SizedBox(height: 16),
                         Text(
                           'Selecciona tu respuesta:',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
+                          style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 12),
@@ -267,17 +300,25 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
                             return ChoiceChip(
                               label: Text(
                                 choice,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
+                                style: Theme.of(context).textTheme.titleMedium
                                     ?.copyWith(fontWeight: FontWeight.w600),
                               ),
                               selected: isSelected,
                               onSelected: (value) {
                                 if (!value) {
-                                  setState(() => _answers.remove(question.number));
+                                  setState(
+                                    () => _answers.remove(question.number),
+                                  );
                                 } else {
                                   _selectAnswer(question.number, choice);
+                                  Future.delayed(
+                                    const Duration(milliseconds: 120),
+                                    () {
+                                      if (mounted) {
+                                        _advanceAfterAnswer(index);
+                                      }
+                                    },
+                                  );
                                 }
                               },
                             );
@@ -354,9 +395,9 @@ class _ExamNavigationBarState extends State<_ExamNavigationBar> {
             tooltip: 'Pregunta anterior',
             onPressed: _current > 0
                 ? () => widget.controller.previousPage(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeInOut,
-                    )
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                  )
                 : null,
             icon: const Icon(Icons.chevron_left),
           ),
@@ -364,9 +405,9 @@ class _ExamNavigationBarState extends State<_ExamNavigationBar> {
             tooltip: 'Pregunta siguiente',
             onPressed: _current < total - 1
                 ? () => widget.controller.nextPage(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeInOut,
-                    )
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                  )
                 : null,
             icon: const Icon(Icons.chevron_right),
           ),

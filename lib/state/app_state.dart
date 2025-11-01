@@ -67,6 +67,11 @@ class AppState extends ChangeNotifier {
       .toList()
     ..sort((a, b) => b.completedAt.compareTo(a.completedAt));
 
+  List<ExamAttempt> attemptsForUser(String userId) => _examAttempts.values
+      .where((attempt) => attempt.userId == userId)
+      .toList()
+    ..sort((a, b) => a.completedAt.compareTo(b.completedAt));
+
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
     final rawProgress = prefs.getString(_progressKey);
@@ -144,9 +149,20 @@ class AppState extends ChangeNotifier {
 
   Future<void> recordExamAttempt(ExamAttempt attempt) async {
     final key = '${attempt.examId}|${attempt.userId}';
+    if (_examAttempts.containsKey(key)) {
+      return;
+    }
     _examAttempts[key] = attempt;
     await _persistExamAttempts();
     notifyListeners();
+  }
+
+  Future<void> resetExamAttempt({required String examId, required String userId}) async {
+    final key = '$examId|$userId';
+    if (_examAttempts.remove(key) != null) {
+      await _persistExamAttempts();
+      notifyListeners();
+    }
   }
 
   Future<void> _persistProgress() async {

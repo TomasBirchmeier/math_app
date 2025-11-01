@@ -25,7 +25,7 @@ class MathApp extends StatelessWidget {
       value: appState,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'App de Matemáticas',
+        title: 'Maths by Tomás',
         theme: ThemeData(
           useMaterial3: true,
           colorSchemeSeed: Colors.indigo,
@@ -49,9 +49,7 @@ class _RootRouter extends StatelessWidget {
       builder: (context, state, _) {
         if (!state.isInitialized) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
+            body: Center(child: CircularProgressIndicator()),
           );
         }
 

@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/ensayo_paes_m1_text.dart';
+import '../data/exam_keys.dart';
 import '../models/exam.dart';
 import '../state/app_state.dart';
+import '../utils/exam_scoring.dart';
 
 class ExamTextSessionPage extends StatefulWidget {
   const ExamTextSessionPage({
@@ -38,7 +40,10 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() {
-        _remainingSeconds = (_remainingSeconds - 1).clamp(0, _totalDurationSeconds);
+        _remainingSeconds = (_remainingSeconds - 1).clamp(
+          0,
+          _totalDurationSeconds,
+        );
       });
       if (_remainingSeconds == 0) {
         _submitExam(auto: true);
@@ -53,6 +58,21 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
     super.dispose();
   }
 
+  void _goToQuestion(int index) {
+    if (!_pageController.hasClients) return;
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  void _advanceAfterAnswer(int currentIndex) {
+    if (currentIndex < widget.questions.length - 1) {
+      _goToQuestion(currentIndex + 1);
+    }
+  }
+
   Future<void> _submitExam({bool auto = false}) async {
     if (!mounted) return;
     _timer?.cancel();
@@ -63,6 +83,12 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
       return;
     }
     final elapsed = DateTime.now().difference(_startedAt).inSeconds;
+    final answerKey = ExamKeys.keyFor(widget.examId);
+    final result = gradeAnswers(
+      answerKey: answerKey,
+      userAnswers: _answers,
+      totalQuestions: widget.questions.length,
+    );
     final attempt = ExamAttempt(
       userId: user.id,
       durationSeconds: elapsed,
@@ -81,11 +107,21 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Respuestas registradas: ${_answers.length} de ${widget.questions.length}.'),
+              Text(
+                'Respuestas registradas: ${_answers.length} de ${widget.questions.length}.',
+              ),
               const SizedBox(height: 8),
+              if (result.totalGradable > 0) ...[
+                Text(
+                  'Correctas: ${result.correct} / ${result.totalGradable} (${(result.accuracy * 100).toStringAsFixed(1)}%)',
+                ),
+                const SizedBox(height: 8),
+              ],
               Text('Duración: ${_formatElapsed(elapsed)}.'),
               const SizedBox(height: 8),
-              const Text('Tu docente podrá revisar tus respuestas desde el panel administrador.'),
+              const Text(
+                'Tu docente podrá revisar tus respuestas desde el panel administrador.',
+              ),
             ],
           ),
           actions: [
@@ -107,7 +143,9 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
       builder: (context) {
         return AlertDialog(
           title: const Text('Salir del ensayo'),
-          content: const Text('Si abandonas ahora, tus respuestas no se guardarán. ¿Deseas salir?'),
+          content: const Text(
+            'Si abandonas ahora, tus respuestas no se guardarán. ¿Deseas salir?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -174,10 +212,14 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
                   const SizedBox(width: 8),
                   Text(
                     'Tiempo restante: ${_formatRemaining(_remainingSeconds)}',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const Spacer(),
-                  Text('Resueltas: ${_answers.length}/${widget.questions.length}'),
+                  Text(
+                    'Resueltas: ${_answers.length}/${widget.questions.length}',
+                  ),
                 ],
               ),
             ),
@@ -189,13 +231,17 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
                   final question = widget.questions[index];
                   final selected = _answers[question.number];
                   return SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
                           'Pregunta ${question.number}',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 12),
                         if (question.context != null)
@@ -212,7 +258,8 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
                           ),
                         Text(
                           question.prompt,
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 16),
                         ...question.options.entries.map(
@@ -229,6 +276,16 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
                                     _answers[question.number] = value;
                                   }
                                 });
+                                if (value != null) {
+                                  Future.delayed(
+                                    const Duration(milliseconds: 120),
+                                    () {
+                                      if (mounted) {
+                                        _advanceAfterAnswer(index);
+                                      }
+                                    },
+                                  );
+                                }
                               },
                               title: Text('${entry.key}) ${entry.value}'),
                             ),
@@ -304,9 +361,9 @@ class _ExamNavigationBarState extends State<_ExamNavigationBar> {
             tooltip: 'Pregunta anterior',
             onPressed: _current > 0
                 ? () => widget.controller.previousPage(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeInOut,
-                    )
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                  )
                 : null,
             icon: const Icon(Icons.chevron_left),
           ),
@@ -314,9 +371,9 @@ class _ExamNavigationBarState extends State<_ExamNavigationBar> {
             tooltip: 'Pregunta siguiente',
             onPressed: _current < widget.total - 1
                 ? () => widget.controller.nextPage(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeInOut,
-                    )
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                  )
                 : null,
             icon: const Icon(Icons.chevron_right),
           ),

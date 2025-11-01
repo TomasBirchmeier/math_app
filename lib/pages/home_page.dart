@@ -1,15 +1,20 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/exam_catalog.dart';
+import '../data/exam_keys.dart';
 import '../data/ensayo_m1_2023.dart';
 import '../data/ensayo_paes_m1_text.dart';
+import '../utils/exam_scoring.dart';
 import '../models/exam.dart';
 import '../state/app_state.dart';
-import '../utils/question_generator.dart';
 import 'profile_page.dart';
 import 'exam_session_page.dart';
 import 'exam_text_session_page.dart';
+import 'practice_page.dart';
+import 'exam_review_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -18,69 +23,35 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
-  late String _temaSeleccionado = AppState.topics.first;
-  List<Map<String, String>> _ejercicios = [];
-  final Map<int, String> _respuestas = {};
-  bool _corregido = false;
-  int _puntos = 0;
-  int _selectedTab = 0;
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
+  static const String _brandName = 'Maths by Tomás';
+  late final AnimationController _heroController;
+  late final AnimationController _titleController;
+  late final Animation<double> _titleAnimation;
 
   @override
   void initState() {
     super.initState();
-    _generarEjercicios(_temaSeleccionado);
-  }
-
-  void _generarEjercicios(String tema) {
-    final nuevosEjercicios = QuestionGenerator().generar(tema);
-    setState(() {
-      _temaSeleccionado = tema;
-      _ejercicios = nuevosEjercicios;
-      _respuestas.clear();
-      _corregido = false;
-      _puntos = 0;
-    });
-  }
-
-  Future<void> _corregir() async {
-    final appState = context.read<AppState>();
-    final user = appState.currentUser;
-    if (user == null) {
-      return;
-    }
-
-    int aciertos = 0;
-    for (int i = 0; i < _ejercicios.length; i++) {
-      final respuesta = _respuestas[i]?.trim();
-      final correcta = _ejercicios[i]['respuesta_correcta'];
-      if (respuesta != null && correcta != null && respuesta == correcta) {
-        aciertos++;
-      }
-    }
-
-    setState(() {
-      _corregido = true;
-      _puntos = aciertos;
-    });
-
-    if (aciertos > 0) {
-      await appState.recordScore(
-        userId: user.id,
-        topic: _temaSeleccionado,
-        points: aciertos,
-      );
-    }
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Obtuviste $aciertos / ${_ejercicios.length} respuestas correctas 🎯',
-        ),
-        backgroundColor: Colors.indigo,
-      ),
+    _heroController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 20),
+    )..repeat();
+    _titleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
     );
+    _titleAnimation = CurvedAnimation(
+      parent: _titleController,
+      curve: Curves.easeOutCubic,
+    );
+    _titleController.forward();
+  }
+
+  @override
+  void dispose() {
+    _heroController.dispose();
+    _titleController.dispose();
+    super.dispose();
   }
 
   @override
@@ -93,11 +64,29 @@ class _HomePageState extends State<HomePage> {
 
     final progreso = appState.progressFor(user.id);
     final total = appState.totalPointsFor(user.id);
+    final attempts = appState.attemptsForUser(user.id);
+    final points = _buildAttemptPoints(attempts);
+    final assetInfo = ExamCatalog.getById(ExamCatalog.assetM1ExamId);
+    final paesInfo = ExamCatalog.getById(ExamCatalog.paesM1ExamId);
+    final assetAttempt = appState.examAttemptFor(assetInfo.id, user.id);
+    final paesAttempt = appState.examAttemptFor(paesInfo.id, user.id);
 
     return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
-        title: Text('Hola, ${user.displayName}'),
+        title: const Text('Maths by Tomás'),
+        elevation: 0,
         actions: [
+          IconButton(
+            tooltip: 'Práctica guiada',
+            icon: const Icon(Icons.auto_graph_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const PracticePage()),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Mi perfil',
             icon: const Icon(Icons.person_outline),
@@ -115,143 +104,75 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: IndexedStack(
-        index: _selectedTab,
-        children: [
-          _buildPracticeTab(progreso, total),
-          _buildExamTab(appState, user.id),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedTab,
-        onDestinationSelected: (index) {
-          setState(() {
-            _selectedTab = index;
-          });
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.school_outlined),
-            selectedIcon: Icon(Icons.school),
-            label: 'Práctica',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.assignment_outlined),
-            selectedIcon: Icon(Icons.assignment),
-            label: 'Ensayos',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPracticeTab(Map<String, int> progreso, int total) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            _ResumenProgreso(progreso: progreso, total: total),
-            const SizedBox(height: 16),
-            _buildSelectorTema(),
-            const SizedBox(height: 16),
-            Expanded(child: _buildEjercicios()),
-            if (_ejercicios.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: ElevatedButton.icon(
-                  onPressed: _corregido ? null : _corregir,
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Corregir respuestas'),
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(50),
-                  ),
-                ),
-              ),
-              if (_corregido)
-                TextButton.icon(
-                  onPressed: () => _generarEjercicios(_temaSeleccionado),
-                  icon: const Icon(Icons.auto_awesome),
-                  label: const Text('Intentar con nuevos ejercicios'),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildExamTab(AppState state, String userId) {
-    final assetInfo = ExamCatalog.getById(ExamCatalog.assetM1ExamId);
-    final paesInfo = ExamCatalog.getById(ExamCatalog.paesM1ExamId);
-    final assetAttempt = state.examAttemptFor(assetInfo.id, userId);
-    final paesAttempt = state.examAttemptFor(paesInfo.id, userId);
-
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Ensayos de preparación PAES',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Selecciona el ensayo que quieres rendir. Cada intento se registra con su tiempo y tus respuestas para que la profesora pueda retroalimentarte.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            _ExamCard(
-              title: assetInfo.title,
-              description: assetInfo.description,
-              questionCount: assetInfo.questionCount,
-              attempt: assetAttempt,
-              formatDuration: _formatDuration,
-              formatDate: _formatAttemptDate,
-              onStart: () => _launchExam(
-                (_) => ExamAssetSessionPage(
-                  examId: assetInfo.id,
-                  examTitle: assetInfo.title,
-                  questions: ensayoM1May2023,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            _ExamCard(
-              title: paesInfo.title,
-              description: paesInfo.description,
-              questionCount: paesInfo.questionCount,
-              attempt: paesAttempt,
-              formatDuration: _formatDuration,
-              formatDate: _formatAttemptDate,
-              onStart: () => _launchExam(
-                (_) => ExamTextSessionPage(
-                  examId: paesInfo.id,
-                  examTitle: paesInfo.title,
-                  questions: paesM1TextQuestions,
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Recomendaciones',
-              style: Theme.of(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildHeroSection(
                 context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '• No cierres la aplicación mientras el ensayo está en curso.',
-            ),
-            const Text(
-              '• Marca la alternativa que consideres correcta (A, B, C o D).',
-            ),
-            const Text(
-              '• El ensayo se enviará automáticamente al agotar el tiempo.',
-            ),
-          ],
+                user.displayName,
+                progreso,
+                total,
+                points,
+                attempts.length,
+              ),
+              const SizedBox(height: 24),
+              _buildPerformanceSection(context, points),
+              const SizedBox(height: 24),
+              Text(
+                'Ensayos disponibles',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 12),
+              _ExamCard(
+                examId: assetInfo.id,
+                title: assetInfo.title,
+                description: assetInfo.description,
+                questionCount: assetInfo.questionCount,
+                attempt: assetAttempt,
+                formatDuration: _formatDuration,
+                formatDate: _formatAttemptDate,
+                onStart: assetAttempt == null
+                    ? () => _launchExam(
+                        (_) => ExamAssetSessionPage(
+                          examId: assetInfo.id,
+                          examTitle: assetInfo.title,
+                          questions: ensayoM1May2023,
+                        ),
+                      )
+                    : null,
+                onReview: assetAttempt == null
+                    ? null
+                    : () => _openReview(assetAttempt),
+              ),
+              const SizedBox(height: 16),
+              _ExamCard(
+                examId: paesInfo.id,
+                title: paesInfo.title,
+                description: paesInfo.description,
+                questionCount: paesInfo.questionCount,
+                attempt: paesAttempt,
+                formatDuration: _formatDuration,
+                formatDate: _formatAttemptDate,
+                onStart: paesAttempt == null
+                    ? () => _launchExam(
+                        (_) => ExamTextSessionPage(
+                          examId: paesInfo.id,
+                          examTitle: paesInfo.title,
+                          questions: paesM1TextQuestions,
+                        ),
+                      )
+                    : null,
+                onReview: paesAttempt == null
+                    ? null
+                    : () => _openReview(paesAttempt),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -285,151 +206,350 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  String _formatDuration(int seconds) {
-    final minutes = seconds ~/ 60;
-    final remainingSeconds = seconds % 60;
-    final hours = minutes ~/ 60;
-    final remainingMinutes = minutes % 60;
-    if (hours > 0) {
-      return '${hours}h ${remainingMinutes}m ${remainingSeconds}s';
-    }
-    return '${minutes}m ${remainingSeconds}s';
-  }
-
-  String _formatAttemptDate(DateTime date) {
-    final day = date.day.toString().padLeft(2, '0');
-    final month = date.month.toString().padLeft(2, '0');
-    final hour = date.hour.toString().padLeft(2, '0');
-    final minute = date.minute.toString().padLeft(2, '0');
-    return '$day/$month $hour:$minute';
-  }
-
-  Widget _buildSelectorTema() {
-    return Row(
-      children: [
-        Expanded(
-          child: DropdownButtonFormField<String>(
-            decoration: const InputDecoration(
-              labelText: 'Selecciona un tema',
-              border: OutlineInputBorder(),
-            ),
-            value: _temaSeleccionado,
-            items: AppState.topics
-                .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                .toList(),
-            onChanged: (value) {
-              if (value != null) {
-                _generarEjercicios(value);
-              }
-            },
-          ),
-        ),
-        const SizedBox(width: 12),
-        IconButton.outlined(
-          tooltip: 'Nuevos ejercicios',
-          icon: const Icon(Icons.refresh),
-          onPressed: () => _generarEjercicios(_temaSeleccionado),
-        ),
-      ],
+  void _openReview(ExamAttempt attempt) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ExamReviewPage(attempt: attempt)),
     );
   }
 
-  Widget _buildEjercicios() {
-    if (_ejercicios.isEmpty) {
-      return const Center(
-        child: Text(
-          'No hay ejercicios disponibles por ahora.',
-          style: TextStyle(fontSize: 16),
-          textAlign: TextAlign.center,
+  Widget _buildHeroSection(
+    BuildContext context,
+    String name,
+    Map<String, int> progreso,
+    int total,
+    List<_AttemptPoint> points,
+    int attemptsCount,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final size = MediaQuery.of(context).size;
+    final isCompact = size.width < 520;
+    final heroHeight = isCompact ? 260.0 : 230.0;
+    final bestTopicEntry = (progreso.isNotEmpty && total > 0)
+        ? progreso.entries.reduce((a, b) => a.value >= b.value ? a : b)
+        : null;
+    final latestPercent = points.isNotEmpty ? points.last.percent : null;
+    return Container(
+      constraints: BoxConstraints(minHeight: heroHeight),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: LinearGradient(
+          colors: [
+            colorScheme.primary,
+            colorScheme.primary.withOpacity(0.85),
+            colorScheme.secondary,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-      );
-    }
-
-    return ListView.separated(
-      itemCount: _ejercicios.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final ejercicio = _ejercicios[index];
-        final correcta = ejercicio['respuesta_correcta'];
-        final esCorrecto = correcta != null && _respuestas[index] == correcta;
-        return Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _heroController,
+              builder: (context, _) => CustomPaint(
+                painter: _HeroBackgroundPainter(
+                  progress: _heroController.value,
+                  baseColor: colorScheme.onPrimary.withOpacity(0.12),
+                ),
+              ),
+            ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
+          Padding(
+            padding: const EdgeInsets.all(24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Ejercicio ${index + 1}',
-                  style: Theme.of(context).textTheme.labelLarge,
+                  'Hola, $name 👋',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: colorScheme.onPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  ejercicio['pregunta'] ?? '',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                _corregido
-                    ? _ResultadoRespuesta(
-                        esCorrecto: esCorrecto,
-                        respuestaCorrecta: correcta ?? '',
-                        respuestaUsuario: _respuestas[index],
-                      )
-                    : TextField(
-                        decoration: const InputDecoration(
-                          labelText: 'Tu respuesta',
-                          border: OutlineInputBorder(),
-                        ),
-                        onChanged: (value) {
-                          _respuestas[index] = value.trim();
-                        },
+                AnimatedBuilder(
+                  animation: _titleAnimation,
+                  builder: (context, _) {
+                    final totalUnits = _brandName.length;
+                    final currentUnits = (_titleAnimation.value * totalUnits)
+                        .clamp(0, totalUnits)
+                        .round();
+                    final endIndex = currentUnits.clamp(0, totalUnits);
+                    final display = currentUnits == 0
+                        ? ''
+                        : _brandName.substring(0, endIndex.toInt());
+                    final showCursor = currentUnits < totalUnits;
+                    final textToShow = (display.isEmpty && showCursor)
+                        ? '|'
+                        : showCursor
+                        ? '$display|'
+                        : display;
+                    return Text(
+                      textToShow,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: colorScheme.onPrimary.withOpacity(0.9),
+                        fontFamily: 'Cursive',
+                        fontSize: 26,
+                        letterSpacing: 1.2,
                       ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Tu hub para ensayos y práctica guiada.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onPrimary.withOpacity(0.78),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _MetricBadge(
+                      label: 'Total acumulado',
+                      value: '$total pts',
+                      tone: MetricTone.light,
+                    ),
+                    _MetricBadge(
+                      label: 'Ensayos rendidos',
+                      value: '$attemptsCount',
+                      tone: MetricTone.light,
+                    ),
+                    if (bestTopicEntry != null)
+                      _MetricBadge(
+                        label: 'Tema destacado',
+                        value: bestTopicEntry.key,
+                        tone: MetricTone.light,
+                      ),
+                    if (latestPercent != null)
+                      _MetricBadge(
+                        label: 'Último puntaje',
+                        value: '${latestPercent.toStringAsFixed(1)}%',
+                        tone: MetricTone.light,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                FilledButton.tonalIcon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const PracticePage()),
+                    );
+                  },
+                  icon: const Icon(Icons.psychology_alt_outlined),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colorScheme.onPrimary.withOpacity(0.18),
+                    foregroundColor: colorScheme.onPrimary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 14,
+                    ),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  label: const Text('Abrir práctica guiada'),
+                ),
               ],
             ),
           ),
-        );
-      },
+        ],
+      ),
     );
+  }
+
+  Widget _buildPerformanceSection(
+    BuildContext context,
+    List<_AttemptPoint> points,
+  ) {
+    final theme = Theme.of(context);
+    final media = MediaQuery.of(context);
+    final chartHeight = media.size.width < 520 ? 180.0 : 220.0;
+    final hasOutliers = points.any((point) => point.outOfBounds);
+    if (points.isEmpty) {
+      return Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Evolución de tus ensayos',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Todavía no tienes resultados automáticos. Rinde un ensayo para comenzar a ver tu progreso.',
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Evolución de tus ensayos',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _PerformanceChart(points: points, height: chartHeight),
+            const SizedBox(height: 16),
+            if (hasOutliers) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.errorContainer.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'Ajustamos algunos puntajes que estaban fuera del rango 0%-100% para mostrar el gráfico correctamente. Revisa las claves cargadas si notas valores inesperados.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onErrorContainer,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            Text(
+              'Último resultado · ${points.last.examTitle}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text(
+              '${points.last.percent.toStringAsFixed(1)}% · ${_formatAttemptDate(points.last.date)}',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<_AttemptPoint> _buildAttemptPoints(List<ExamAttempt> attempts) {
+    final List<_AttemptPoint> items = [];
+    for (final attempt in attempts) {
+      final key = ExamKeys.keyFor(attempt.examId);
+      if (key.isEmpty) {
+        continue;
+      }
+      final excluded = ExamKeys.excludedFor(attempt.examId);
+      final result = gradeAnswers(
+        answerKey: key,
+        userAnswers: attempt.answers,
+        totalQuestions: ExamCatalog.getById(attempt.examId).questionCount,
+        excluded: excluded,
+      );
+      if (result.totalGradable == 0) {
+        continue;
+      }
+      final examTitle = ExamCatalog.getById(attempt.examId).title;
+      final percent = result.accuracy * 100;
+      final sanitizedPercent = percent.isFinite ? percent.clamp(0, 100) : 0.0;
+      final outOfBounds = !percent.isFinite || percent < 0 || percent > 100;
+      items.add(
+        _AttemptPoint(
+          date: attempt.completedAt,
+          percent: sanitizedPercent.toDouble(),
+          examTitle: examTitle,
+          outOfBounds: outOfBounds,
+        ),
+      );
+    }
+    return items;
+  }
+
+  String _formatDuration(int seconds) {
+    final duration = Duration(seconds: seconds);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final secs = duration.inSeconds.remainder(60);
+    if (hours > 0) {
+      return '${hours}h ${minutes.toString().padLeft(2, '0')}m';
+    }
+    return '${duration.inMinutes}m ${secs.toString().padLeft(2, '0')}s';
+  }
+
+  String _formatAttemptDate(DateTime date) {
+    final local = date.toLocal();
+    final day = local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final year = local.year.toString();
+    return '$day/$month/$year';
   }
 }
 
 class _ExamCard extends StatelessWidget {
   const _ExamCard({
+    required this.examId,
     required this.title,
     required this.description,
     required this.questionCount,
     required this.attempt,
     required this.onStart,
+    this.onReview,
     required this.formatDuration,
     required this.formatDate,
   });
 
+  final String examId;
   final String title;
   final String description;
   final int questionCount;
   final ExamAttempt? attempt;
-  final VoidCallback onStart;
+  final VoidCallback? onStart;
+  final VoidCallback? onReview;
   final String Function(int) formatDuration;
   final String Function(DateTime) formatDate;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    ExamResult? result;
+    if (attempt != null) {
+      final answerKey = ExamKeys.keyFor(examId);
+      if (answerKey.isNotEmpty) {
+        final excluded = ExamKeys.excludedFor(examId);
+        result = gradeAnswers(
+          answerKey: answerKey,
+          userAnswers: attempt!.answers,
+          totalQuestions: questionCount,
+          excluded: excluded,
+        );
+      }
+    }
+
     return Card(
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 8),
             Text(description),
@@ -439,21 +559,38 @@ class _ExamCard extends StatelessWidget {
               const SizedBox(height: 12),
               Text(
                 'Último intento',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 4),
               Text('Respondidas: ${attempt!.answeredCount} / $questionCount'),
               Text('Duración: ${formatDuration(attempt!.durationSeconds)}'),
               Text('Fecha: ${formatDate(attempt!.completedAt)}'),
+              if (result != null && result.totalGradable > 0)
+                Text(
+                  'Resultado: ${result.correct} / ${result.totalGradable} (${(result.accuracy * 100).toStringAsFixed(1)}%)',
+                  style: theme.textTheme.bodyMedium,
+                ),
             ],
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: onStart,
-              icon: const Icon(Icons.play_circle_fill),
-              label: const Text('Iniciar ensayo'),
+              icon: Icon(
+                onStart != null ? Icons.play_circle_fill : Icons.lock_outline,
+              ),
+              label: Text(
+                onStart != null ? 'Iniciar ensayo' : 'Ensayo completado',
+              ),
             ),
+            if (onReview != null) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: onReview,
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text('Ver respuestas'),
+              ),
+            ],
           ],
         ),
       ),
@@ -461,125 +598,329 @@ class _ExamCard extends StatelessWidget {
   }
 }
 
-class _ResumenProgreso extends StatelessWidget {
-  const _ResumenProgreso({required this.progreso, required this.total});
+enum MetricTone { light, normal }
 
-  final Map<String, int> progreso;
-  final int total;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 3,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Tu progreso general',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: AppState.topics
-                  .map(
-                    (topic) =>
-                        _TopicChip(topic: topic, points: progreso[topic] ?? 0),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                'Total acumulado: $total puntos',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onPrimaryContainer,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TopicChip extends StatelessWidget {
-  const _TopicChip({required this.topic, required this.points});
-
-  final String topic;
-  final int points;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Chip(
-      avatar: CircleAvatar(
-        backgroundColor: scheme.secondary,
-        child: Text(
-          topic.substring(0, 1),
-          style: TextStyle(
-            color: scheme.onSecondary,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-      label: Text('$topic • $points pts'),
-    );
-  }
-}
-
-class _ResultadoRespuesta extends StatelessWidget {
-  const _ResultadoRespuesta({
-    required this.esCorrecto,
-    required this.respuestaCorrecta,
-    this.respuestaUsuario,
+class _MetricBadge extends StatelessWidget {
+  const _MetricBadge({
+    required this.label,
+    required this.value,
+    this.tone = MetricTone.normal,
   });
 
-  final bool esCorrecto;
-  final String respuestaCorrecta;
-  final String? respuestaUsuario;
+  final String label;
+  final String value;
+  final MetricTone tone;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(
-              esCorrecto ? Icons.check_circle : Icons.cancel,
-              color: esCorrecto ? Colors.green : Colors.red,
+    final scheme = Theme.of(context).colorScheme;
+    final bool isLight = tone == MetricTone.light;
+    final Color background = isLight
+        ? Colors.white.withOpacity(0.18)
+        : scheme.surfaceVariant.withOpacity(0.9);
+    final Color textColor = isLight ? Colors.white : scheme.onSurface;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: textColor,
+              fontWeight: FontWeight.w700,
             ),
-            const SizedBox(width: 8),
-            Text(
-              esCorrecto ? '¡Correcto!' : 'Respuesta incorrecta',
-              style: TextStyle(
-                color: esCorrecto ? Colors.green : Colors.red,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Tu respuesta: ${respuestaUsuario?.isEmpty ?? true ? '—' : respuestaUsuario}',
-        ),
-        Text('Respuesta correcta: $respuestaCorrecta'),
-      ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: textColor.withOpacity(0.75)),
+          ),
+        ],
+      ),
     );
+  }
+}
+
+class _HeroBackgroundPainter extends CustomPainter {
+  const _HeroBackgroundPainter({
+    required this.progress,
+    required this.baseColor,
+  });
+
+  final double progress;
+  final Color baseColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..style = PaintingStyle.fill;
+
+    paint.color = baseColor;
+    canvas.drawCircle(
+      Offset(
+        size.width * (0.2 + 0.05 * math.sin(progress * 2 * math.pi)),
+        size.height * 0.28,
+      ),
+      size.width * 0.25,
+      paint,
+    );
+
+    paint.color = baseColor.withOpacity(0.65);
+    canvas.drawCircle(
+      Offset(
+        size.width * (0.72 + 0.04 * math.cos(progress * 2 * math.pi)),
+        size.height * 0.22,
+      ),
+      size.width * 0.18,
+      paint,
+    );
+
+    paint.color = baseColor.withOpacity(0.4);
+    canvas.drawCircle(
+      Offset(
+        size.width * 0.55,
+        size.height * (0.72 + 0.03 * math.sin(progress * math.pi)),
+      ),
+      size.width * 0.35,
+      paint,
+    );
+
+    final wavePath = Path()
+      ..moveTo(0, size.height * 0.68)
+      ..quadraticBezierTo(
+        size.width * 0.25,
+        size.height * (0.68 + 0.07 * math.sin(progress * 2 * math.pi)),
+        size.width * 0.5,
+        size.height * (0.71 - 0.05 * math.cos(progress * 2 * math.pi)),
+      )
+      ..quadraticBezierTo(
+        size.width * 0.75,
+        size.height * (0.74 + 0.04 * math.sin(progress * 3 * math.pi)),
+        size.width,
+        size.height * (0.7 - 0.05 * math.sin(progress * 2 * math.pi)),
+      )
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+
+    paint.color = baseColor.withOpacity(0.35);
+    canvas.drawPath(wavePath, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HeroBackgroundPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.baseColor != baseColor;
+  }
+}
+
+class _AttemptPoint {
+  const _AttemptPoint({
+    required this.date,
+    required this.percent,
+    required this.examTitle,
+    this.outOfBounds = false,
+  });
+
+  final DateTime date;
+  final double percent;
+  final String examTitle;
+  final bool outOfBounds;
+}
+
+class _PerformanceChart extends StatelessWidget {
+  const _PerformanceChart({required this.points, required this.height});
+
+  final List<_AttemptPoint> points;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      height: height,
+      child: CustomPaint(
+        painter: _PerformanceChartPainter(
+          points: points,
+          colorScheme: theme.colorScheme,
+          textStyle: theme.textTheme.bodySmall ?? const TextStyle(fontSize: 12),
+        ),
+      ),
+    );
+  }
+}
+
+class _PerformanceChartPainter extends CustomPainter {
+  _PerformanceChartPainter({
+    required this.points,
+    required this.colorScheme,
+    required this.textStyle,
+  });
+
+  final List<_AttemptPoint> points;
+  final ColorScheme colorScheme;
+  final TextStyle textStyle;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const leftPadding = 38.0;
+    const rightPadding = 12.0;
+    const topPadding = 14.0;
+    const bottomPadding = 30.0;
+
+    final chartWidth = size.width - leftPadding - rightPadding;
+    final chartHeight = size.height - topPadding - bottomPadding;
+
+    final axisPaint = Paint()
+      ..color = colorScheme.outline.withOpacity(0.35)
+      ..strokeWidth = 1.1;
+
+    final gridPaint = Paint()
+      ..color = colorScheme.outline.withOpacity(0.18)
+      ..strokeWidth = 1;
+
+    // Axes
+    canvas.drawLine(
+      Offset(leftPadding, topPadding),
+      Offset(leftPadding, size.height - bottomPadding),
+      axisPaint,
+    );
+    canvas.drawLine(
+      Offset(leftPadding, size.height - bottomPadding),
+      Offset(size.width - rightPadding, size.height - bottomPadding),
+      axisPaint,
+    );
+
+    const yValues = [0, 25, 50, 75, 100];
+    for (final value in yValues) {
+      final dy = topPadding + chartHeight * (1 - value / 100);
+      canvas.drawLine(
+        Offset(leftPadding, dy),
+        Offset(size.width - rightPadding, dy),
+        gridPaint,
+      );
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '$value%',
+          style: textStyle.copyWith(
+            color: colorScheme.onSurface.withOpacity(0.6),
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(leftPadding - tp.width - 6, dy - tp.height / 2));
+    }
+
+    if (points.isEmpty) {
+      return;
+    }
+
+    final path = Path();
+    final fillPath = Path();
+    final offsets = <Offset>[];
+    final denominator = math.max(1, points.length - 1);
+    for (var i = 0; i < points.length; i++) {
+      final progress = i / denominator;
+      final x = leftPadding + chartWidth * progress;
+      final y =
+          topPadding +
+          chartHeight * (1 - points[i].percent.clamp(0, 100) / 100);
+      final offset = Offset(x, y);
+      offsets.add(offset);
+      if (i == 0) {
+        path.moveTo(x, y);
+        fillPath.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+        fillPath.lineTo(x, y);
+      }
+    }
+
+    fillPath
+      ..lineTo(offsets.last.dx, size.height - bottomPadding)
+      ..lineTo(offsets.first.dx, size.height - bottomPadding)
+      ..close();
+
+    final fillPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..shader =
+          LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [colorScheme.primary.withOpacity(0.25), Colors.transparent],
+          ).createShader(
+            Rect.fromLTWH(leftPadding, topPadding, chartWidth, chartHeight),
+          );
+
+    final linePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..shader =
+          LinearGradient(
+            colors: [colorScheme.primary, colorScheme.secondary],
+          ).createShader(
+            Rect.fromLTWH(leftPadding, topPadding, chartWidth, chartHeight),
+          );
+
+    canvas.drawPath(fillPath, fillPaint);
+    canvas.drawPath(path, linePaint);
+
+    final pointPaint = Paint()
+      ..color = colorScheme.primary
+      ..style = PaintingStyle.fill;
+
+    for (final offset in offsets) {
+      canvas.drawCircle(offset, 4, pointPaint);
+    }
+
+    final labelCount = math.min(points.length, 5);
+    final Set<int> selectedIndices = <int>{};
+    if (labelCount == 1) {
+      selectedIndices.add(0);
+    } else if (labelCount > 1) {
+      final maxIndex = points.length - 1;
+      for (var i = 0; i < labelCount; i++) {
+        final position = (i * maxIndex / (labelCount - 1)).round();
+        selectedIndices.add(position);
+      }
+      selectedIndices.add(0);
+      selectedIndices.add(maxIndex);
+    }
+    final sortedIndices = selectedIndices.toList()..sort();
+
+    for (final index in sortedIndices) {
+      final point = points[index];
+      final dx = offsets[index].dx;
+      final label =
+          '${point.date.day.toString().padLeft(2, '0')}/${point.date.month.toString().padLeft(2, '0')}';
+      final tp = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: textStyle.copyWith(
+            color: colorScheme.onSurface.withOpacity(0.7),
+          ),
+        ),
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.ltr,
+      )..layout(minWidth: 0, maxWidth: 80);
+      tp.paint(
+        canvas,
+        Offset(dx - tp.width / 2, size.height - bottomPadding + 6),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PerformanceChartPainter oldDelegate) {
+    return oldDelegate.points != points ||
+        oldDelegate.colorScheme != colorScheme;
   }
 }
