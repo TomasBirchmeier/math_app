@@ -1,0 +1,17 @@
+<svg width="320" height="100" viewBox="0 0 320 100" xmlns="http://www.w3.org/2000/svg" font-family="'Nunito Rounded', 'Poppins', sans-serif">
+
+  <rect width="320" height="100" fill="none"/>
+
+  <text x="20" y="65"
+        font-size="56"
+        fill="#8B5CFF"
+        font-weight="800"
+        style="font-family:'Nunito Rounded', sans-serif; letter-spacing:-0.03em;">
+    QUANT
+  </text>
+
+  <rect x="230" y="32" rx="8" ry="8" width="36" height="36" fill="#6BF0A8"/>
+  <line x1="248" y1="40" x2="248" y2="60" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+  <line x1="238" y1="50" x2="258" y2="50" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+
+</svg>
