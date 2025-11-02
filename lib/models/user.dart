@@ -6,10 +6,12 @@ class User {
     required this.displayName,
     required this.role,
     required this.password,
+    this.email,
   });
 
   final String id;
   final String displayName;
   final UserRole role;
   final String password;
+  final String? email;
 }

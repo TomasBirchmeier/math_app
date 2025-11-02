@@ -6,6 +6,7 @@ import '../data/exam_keys.dart';
 import '../models/user.dart';
 import '../state/app_state.dart';
 import '../utils/exam_scoring.dart';
+import '../utils/report_service.dart';
 import 'exam_overview_page.dart';
 import 'exam_review_page.dart';
 
@@ -156,7 +157,28 @@ class _StudentsTable extends StatelessWidget {
   ) {
     final attempts = appState.attemptsForUser(student.id);
     if (attempts.isEmpty) {
-      return const Text('Sin ensayos rendidos');
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Sin ensayos rendidos'),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            icon: const Icon(Icons.email_outlined),
+            label: const Text('Enviar reporte de práctica'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            ),
+            onPressed: () async {
+              await ReportService.sendStudentReport(
+                context: context,
+                appState: appState,
+                student: student,
+              );
+            },
+          ),
+        ],
+      );
     }
 
     final latestAttempt = attempts.last;
@@ -220,6 +242,22 @@ class _StudentsTable extends StatelessWidget {
               MaterialPageRoute(
                 builder: (_) => ExamReviewPage(attempt: latestAttempt),
               ),
+            );
+          },
+        ),
+        FilledButton.icon(
+          icon: const Icon(Icons.email_outlined),
+          label: const Text('Enviar reporte Quant+'),
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          ),
+          onPressed: () async {
+            await ReportService.sendStudentReport(
+              context: context,
+              appState: appState,
+              student: student,
             );
           },
         ),

@@ -22,36 +22,42 @@ class AppState extends ChangeNotifier {
       displayName: 'Profesor Tomás',
       role: UserRole.admin,
       password: 'admin2806',
+      email: 'tomas@quantplus.cl',
     ),
     User(
       id: 'sofia',
       displayName: 'Sofía Torres',
       role: UserRole.student,
       password: 'sofia456',
+      email: 'birchmeiertomas@gmail.com',
     ),
     User(
       id: 'Agustin_Hermosilla',
       displayName: 'Agustín Hermosilla',
       role: UserRole.student,
       password: 'agustin2010',
+      email: 'agustin.hermosilla@quantplus.cl',
     ),
     User(
       id: 'Cristobal_Rojas',
       displayName: 'Cristóbal Rojas',
       role: UserRole.student,
       password: 'cristobal2007',
+      email: 'cristobal.rojas@quantplus.cl',
     ),
     User(
       id: 'mateo',
       displayName: 'Mateo Díaz',
       role: UserRole.student,
       password: 'mateo456',
+      email: 'mateo.diaz@quantplus.cl',
     ),
     User(
       id: 'valentina',
       displayName: 'Valentina Ruiz',
       role: UserRole.student,
       password: 'valen456',
+      email: 'valentina.ruiz@quantplus.cl',
     ),
   ];
 
