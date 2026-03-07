@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../data/exam_catalog.dart';
 import '../data/exam_keys.dart';
 import '../data/ensayo_m1_2023.dart';
 import '../models/exam.dart';
@@ -33,28 +34,36 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
   late DateTime _startedAt;
   int _remainingSeconds = _totalDurationSeconds;
   Timer? _timer;
+  Timer? _remoteSyncDebounce;
+  late final bool _isGuideExam;
 
   @override
   void initState() {
     super.initState();
+    _isGuideExam = widget.examId == ExamCatalog.agustinGuideExamId;
     _startedAt = DateTime.now();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() {
-        _remainingSeconds = (_remainingSeconds - 1).clamp(
-          0,
-          _totalDurationSeconds,
-        );
+    if (!_isGuideExam) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        setState(() {
+          _remainingSeconds = (_remainingSeconds - 1).clamp(
+            0,
+            _totalDurationSeconds,
+          );
+        });
+        if (_remainingSeconds == 0) {
+          _submitExam(auto: true);
+        }
       });
-      if (_remainingSeconds == 0) {
-        _submitExam(auto: true);
-      }
-    });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _restoreDraft());
+    }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _remoteSyncDebounce?.cancel();
     _pageController.dispose();
     super.dispose();
   }
@@ -63,6 +72,8 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
     setState(() {
       _answers[questionNumber] = choice;
     });
+    _scheduleRemoteSync();
+    _persistDraft();
   }
 
   void _goToQuestion(int index) {
@@ -80,9 +91,63 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
     }
   }
 
+  Future<void> _restoreDraft() async {
+    if (!mounted) return;
+    final appState = context.read<AppState>();
+    final user = appState.currentUser;
+    if (user == null) return;
+    final draft = appState.examDraftFor(widget.examId, user.id);
+    if (draft.isEmpty) return;
+    setState(() {
+      _answers.addAll(draft);
+    });
+    final firstPendingIndex = widget.questions.indexWhere(
+      (question) => !_answers.containsKey(question.number),
+    );
+    if (firstPendingIndex > 0 && _pageController.hasClients) {
+      _pageController.jumpToPage(firstPendingIndex);
+    }
+  }
+
+  Future<void> _persistDraft() async {
+    if (!_isGuideExam || !mounted) return;
+    final appState = context.read<AppState>();
+    final user = appState.currentUser;
+    if (user == null) return;
+    await appState.saveExamDraft(
+      examId: widget.examId,
+      userId: user.id,
+      answers: _answers,
+    );
+  }
+
+  Future<void> _handleSaveAndExit() async {
+    if (!mounted) return;
+    if (_isGuideExam) {
+      await _persistDraft();
+      await _syncRemoteProgress();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Avance guardado. Puedes continuar más tarde desde la sección de ensayos.',
+          ),
+        ),
+      );
+      Navigator.of(context).pop();
+      return;
+    }
+    final shouldExit = await _confirmExit();
+    if (shouldExit && mounted) {
+      _timer?.cancel();
+      Navigator.of(context).pop();
+    }
+  }
+
   Future<void> _submitExam({bool auto = false}) async {
     if (!mounted) return;
     _timer?.cancel();
+    _remoteSyncDebounce?.cancel();
     final appState = context.read<AppState>();
     final user = appState.currentUser;
     if (user == null) {
@@ -106,6 +171,9 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
       examId: widget.examId,
     );
     await appState.recordExamAttempt(attempt);
+    if (_isGuideExam) {
+      await appState.clearExamDraft(examId: widget.examId, userId: user.id);
+    }
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -132,7 +200,9 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
                 const SizedBox(height: 8),
               ] else ...[
                 Text(
-                  'Aún no hay clave cargada para este ensayo. Revisa tus respuestas con tu profesora.',
+                  widget.examId == ExamCatalog.agustinGuideExamId
+                      ? 'Ensayo de práctica guiada Quant+. Durante la clase revisaremos estas preguntas y la estrategia de resolución.'
+                      : 'Aún no hay clave cargada para este ensayo. Revisa tus respuestas con tu profesora.',
                 ),
                 const SizedBox(height: 8),
               ],
@@ -156,14 +226,35 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
     Navigator.of(context).pop();
   }
 
+  void _scheduleRemoteSync() {
+    _remoteSyncDebounce?.cancel();
+    _remoteSyncDebounce = Timer(const Duration(milliseconds: 500), () {
+      unawaited(_syncRemoteProgress());
+    });
+  }
+
+  Future<void> _syncRemoteProgress() async {
+    if (!mounted) return;
+    final appState = context.read<AppState>();
+    await appState.syncRemoteProgress(
+      examId: widget.examId,
+      examTitle: widget.examTitle,
+      questionCount: widget.questions.length,
+      startedAt: _startedAt,
+      answers: Map<int, String>.from(_answers),
+    );
+  }
+
   Future<bool> _confirmExit() async {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('Salir del ensayo'),
-          content: const Text(
-            'Si abandonas ahora, tus respuestas no se guardarán. ¿Deseas salir?',
+          content: Text(
+            _isGuideExam
+                ? 'Puedes cerrar esta guía y retomarla más tarde. ¿Quieres salir ahora?'
+                : 'Si abandonas ahora, tus respuestas no se guardarán. ¿Deseas salir?',
           ),
           actions: [
             TextButton(
@@ -178,14 +269,10 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
         );
       },
     );
+    if (_isGuideExam && result == true) {
+      await _persistDraft();
+    }
     return result ?? false;
-  }
-
-  String _formatRemaining(int seconds) {
-    final hrs = seconds ~/ 3600;
-    final mins = (seconds % 3600) ~/ 60;
-    final secs = seconds % 60;
-    return '${hrs.toString().padLeft(2, '0')}:${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
   }
 
   String _formatElapsed(int seconds) {
@@ -230,26 +317,16 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
         ),
         body: Column(
           children: [
-            Container(
-              color: Theme.of(context).colorScheme.surfaceVariant,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  const Icon(Icons.timer_outlined),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Tiempo restante: ${_formatRemaining(_remainingSeconds)}',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+            _isGuideExam
+                ? _GuideProgressHeader(
+                    answered: _answers.length,
+                    total: widget.questions.length,
+                  )
+                : _TimedHeader(
+                    remainingSeconds: _remainingSeconds,
+                    answered: _answers.length,
+                    total: widget.questions.length,
                   ),
-                  const Spacer(),
-                  Text(
-                    'Resueltas: ${_answers.length}/${widget.questions.length}',
-                  ),
-                ],
-              ),
-            ),
             Expanded(
               child: PageView.builder(
                 controller: _pageController,
@@ -295,7 +372,7 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
                         Wrap(
                           spacing: 12,
                           runSpacing: 12,
-                          children: ['A', 'B', 'C', 'D'].map((choice) {
+                          children: ['A', 'B', 'C', 'D', 'E'].map((choice) {
                             final isSelected = choice == selected;
                             return ChoiceChip(
                               label: Text(
@@ -309,6 +386,7 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
                                   setState(
                                     () => _answers.remove(question.number),
                                   );
+                                  _persistDraft();
                                 } else {
                                   _selectAnswer(question.number, choice);
                                   Future.delayed(
@@ -334,9 +412,100 @@ class _ExamAssetSessionPageState extends State<ExamAssetSessionPage> {
               controller: _pageController,
               total: widget.questions.length,
               onSubmit: () => _submitExam(auto: false),
+              onSave: _handleSaveAndExit,
+              showSave: true,
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _TimedHeader extends StatelessWidget {
+  const _TimedHeader({
+    required this.remainingSeconds,
+    required this.answered,
+    required this.total,
+  });
+
+  final int remainingSeconds;
+  final int answered;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceVariant,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          const Icon(Icons.timer_outlined),
+          const SizedBox(width: 8),
+          Text(
+            'Tiempo restante: ${_formatRemainingStatic(remainingSeconds)}',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const Spacer(),
+          Text('Resueltas: $answered/$total'),
+        ],
+      ),
+    );
+  }
+
+  static String _formatRemainingStatic(int seconds) {
+    final hrs = seconds ~/ 3600;
+    final mins = (seconds % 3600) ~/ 60;
+    final secs = seconds % 60;
+    return '${hrs.toString().padLeft(2, '0')}:${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+  }
+}
+
+class _GuideProgressHeader extends StatelessWidget {
+  const _GuideProgressHeader({required this.answered, required this.total});
+
+  final int answered;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = total == 0 ? 0.0 : answered / total;
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceVariant,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.task_alt_outlined),
+              const SizedBox(width: 8),
+              Text(
+                'Avance guardado automáticamente',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              Text('$answered de $total respondidas'),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: LinearProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              minHeight: 12,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Puedes salir y volver cuando quieras; tus respuestas quedan guardadas.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
       ),
     );
   }
@@ -347,11 +516,15 @@ class _ExamNavigationBar extends StatefulWidget {
     required this.controller,
     required this.total,
     required this.onSubmit,
+    required this.onSave,
+    this.showSave = false,
   });
 
   final PageController controller;
   final int total;
   final VoidCallback onSubmit;
+  final VoidCallback onSave;
+  final bool showSave;
 
   @override
   State<_ExamNavigationBar> createState() => _ExamNavigationBarState();
@@ -412,10 +585,18 @@ class _ExamNavigationBarState extends State<_ExamNavigationBar> {
             icon: const Icon(Icons.chevron_right),
           ),
           const SizedBox(width: 12),
+          if (widget.showSave) ...[
+            FilledButton.tonalIcon(
+              onPressed: widget.onSave,
+              icon: const Icon(Icons.cloud_download_outlined),
+              label: const Text('Guardar y continuar después'),
+            ),
+            const SizedBox(width: 12),
+          ],
           FilledButton.icon(
             onPressed: widget.onSubmit,
             icon: const Icon(Icons.send),
-            label: const Text('Enviar'),
+            label: const Text('Entregar ahora'),
           ),
         ],
       ),

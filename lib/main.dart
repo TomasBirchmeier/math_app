@@ -1,7 +1,10 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'firebase/firebase_runtime_config.dart';
 import 'models/user.dart';
 import 'pages/admin_dashboard_page.dart';
 import 'pages/home_page.dart';
@@ -10,9 +13,22 @@ import 'state/app_state.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _initializeFirebase();
   final appState = AppState();
   await appState.initialize();
   runApp(MathApp(appState: appState));
+}
+
+Future<void> _initializeFirebase() async {
+  if (!kIsWeb || !FirebaseRuntimeConfig.isConfigured) {
+    return;
+  }
+  try {
+    await Firebase.initializeApp(options: FirebaseRuntimeConfig.webOptions);
+  } catch (error, stackTrace) {
+    debugPrint('Firebase initialization failed: $error');
+    debugPrintStack(stackTrace: stackTrace);
+  }
 }
 
 class MathApp extends StatelessWidget {

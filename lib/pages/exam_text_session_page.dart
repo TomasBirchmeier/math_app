@@ -32,6 +32,7 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
   late DateTime _startedAt;
   int _remainingSeconds = _totalDurationSeconds;
   Timer? _timer;
+  Timer? _remoteSyncDebounce;
 
   @override
   void initState() {
@@ -54,6 +55,7 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _remoteSyncDebounce?.cancel();
     _pageController.dispose();
     super.dispose();
   }
@@ -76,6 +78,7 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
   Future<void> _submitExam({bool auto = false}) async {
     if (!mounted) return;
     _timer?.cancel();
+    _remoteSyncDebounce?.cancel();
     final appState = context.read<AppState>();
     final user = appState.currentUser;
     if (user == null) {
@@ -135,6 +138,25 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
     );
     if (!mounted) return;
     Navigator.of(context).pop();
+  }
+
+  void _scheduleRemoteSync() {
+    _remoteSyncDebounce?.cancel();
+    _remoteSyncDebounce = Timer(const Duration(milliseconds: 500), () {
+      unawaited(_syncRemoteProgress());
+    });
+  }
+
+  Future<void> _syncRemoteProgress() async {
+    if (!mounted) return;
+    final appState = context.read<AppState>();
+    await appState.syncRemoteProgress(
+      examId: widget.examId,
+      examTitle: widget.examTitle,
+      questionCount: widget.questions.length,
+      startedAt: _startedAt,
+      answers: Map<int, String>.from(_answers),
+    );
   }
 
   Future<bool> _confirmExit() async {
@@ -276,6 +298,7 @@ class _ExamTextSessionPageState extends State<ExamTextSessionPage> {
                                     _answers[question.number] = value;
                                   }
                                 });
+                                _scheduleRemoteSync();
                                 if (value != null) {
                                   Future.delayed(
                                     const Duration(milliseconds: 120),

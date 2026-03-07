@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../data/exam_catalog.dart';
 import '../data/exam_keys.dart';
 import '../data/ensayo_m1_2023.dart';
+import '../data/ensayo_agustin.dart';
 import '../data/ensayo_m1_2023_feb.dart';
 import '../data/ensayo_paes_m1_text.dart';
 import '../utils/exam_scoring.dart';
@@ -74,6 +75,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final assetAttempt = appState.examAttemptFor(assetInfo.id, user.id);
     final febAttempt = appState.examAttemptFor(febInfo.id, user.id);
     final paesAttempt = appState.examAttemptFor(paesInfo.id, user.id);
+    ExamCatalogEntry? agustinInfo;
+    ExamAttempt? agustinAttempt;
+    if (user.id == 'Agustin_Hermosilla') {
+      agustinInfo = ExamCatalog.getById(ExamCatalog.agustinGuideExamId);
+      agustinAttempt = appState.examAttemptFor(agustinInfo.id, user.id);
+    }
 
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
@@ -179,6 +186,29 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     : null,
                 onReview: febAttempt == null ? null : () => _openReview(febAttempt),
               ),
+              if (agustinInfo != null) ...[
+                const SizedBox(height: 16),
+                _ExamCard(
+                  examId: agustinInfo.id,
+                  title: agustinInfo.title,
+                  description: '${agustinInfo.description} Solo disponible para ti.',
+                  questionCount: agustinInfo.questionCount,
+                  attempt: agustinAttempt,
+                  formatDuration: _formatDuration,
+                  formatDate: _formatAttemptDate,
+                  onStart: agustinAttempt == null
+                      ? () => _launchExam(
+                          (_) => ExamAssetSessionPage(
+                            examId: agustinInfo!.id,
+                            examTitle: agustinInfo.title,
+                            questions: ensayoAgustin,
+                          ),
+                        )
+                      : null,
+                  onReview:
+                      agustinAttempt == null ? null : () => _openReview(agustinAttempt!),
+                ),
+              ],
               const SizedBox(height: 16),
               _ExamCard(
                 examId: paesInfo.id,

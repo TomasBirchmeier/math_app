@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../data/exam_catalog.dart';
 import '../data/exam_keys.dart';
+import '../models/exam.dart';
 import '../models/user.dart';
+import '../services/remote_submission_service.dart';
 import '../state/app_state.dart';
 import '../utils/exam_scoring.dart';
 import '../utils/report_service.dart';
@@ -55,6 +57,17 @@ class AdminDashboardPage extends StatelessWidget {
               icon: const Icon(Icons.assignment_outlined),
               label: const Text('Ver ensayos entregados'),
             ),
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const RemoteMonitorPage()),
+                );
+              },
+              icon: const Icon(Icons.cloud_sync_outlined),
+              label: const Text('Ver seguimiento remoto'),
+            ),
             const SizedBox(height: 24),
             if (students.isNotEmpty)
               _AdminStats(
@@ -67,12 +80,166 @@ class AdminDashboardPage extends StatelessWidget {
             Expanded(
               child: Card(
                 elevation: 3,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: _StudentsTable(students: students),
                 ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class RemoteMonitorPage extends StatelessWidget {
+  const RemoteMonitorPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final service = RemoteSubmissionService.instance;
+    final stream = service.watchSubmissions(
+      classId: AppState.remoteClassroomId,
+    );
+    return Scaffold(
+      appBar: AppBar(title: const Text('Seguimiento remoto Firebase')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: !service.isEnabled
+            ? const _FirebaseConfigHint()
+            : StreamBuilder<List<RemoteSubmissionRecord>>(
+                stream: stream,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text(
+                        'No se pudo cargar el seguimiento remoto.\n${snapshot.error}',
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  }
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final records = snapshot.data!;
+                  if (records.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        'Aun no hay respuestas remotas. Cuando un alumno avance en su ensayo, aparecera aqui.',
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  }
+                  return Card(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: ListView.separated(
+                      padding: const EdgeInsets.all(8),
+                      itemCount: records.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final record = records[index];
+                        final statusText = record.isSubmitted
+                            ? 'Enviado'
+                            : 'En progreso';
+                        final stamp = _formatStamp(record.lastUpdate);
+                        final summary =
+                            '${record.answeredCount}/${record.questionCount} respondidas · $statusText · $stamp';
+                        return ListTile(
+                          leading: CircleAvatar(
+                            child: Text(record.answeredCount.toString()),
+                          ),
+                          title: Text(
+                            '${record.studentName} · ${record.examTitle}',
+                          ),
+                          subtitle: Text(
+                            '$summary\nUsuario: ${record.studentId}',
+                          ),
+                          isThreeLine: true,
+                          trailing: record.answers.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Revisar respuestas',
+                                  onPressed: () {
+                                    final attempt = ExamAttempt(
+                                      userId: record.studentId,
+                                      durationSeconds:
+                                          record.durationSeconds ?? 0,
+                                      answers: record.answers,
+                                      completedAt:
+                                          record.lastUpdate ?? DateTime.now(),
+                                      examId: record.examId,
+                                    );
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            ExamReviewPage(attempt: attempt),
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.visibility_outlined),
+                                ),
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+      ),
+    );
+  }
+
+  static String _formatStamp(DateTime? date) {
+    if (date == null) {
+      return 'sin hora';
+    }
+    final local = date.toLocal();
+    final day = local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$day/$month $hour:$minute';
+  }
+}
+
+class _FirebaseConfigHint extends StatelessWidget {
+  const _FirebaseConfigHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Firebase aun no esta configurado en este build.',
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Compila el proyecto web con tus claves de Firebase para activar el seguimiento remoto:',
+            ),
+            const SizedBox(height: 12),
+            const SelectableText(
+              'flutter build web --release '
+              '--dart-define=FIREBASE_API_KEY=... '
+              '--dart-define=FIREBASE_APP_ID=... '
+              '--dart-define=FIREBASE_MESSAGING_SENDER_ID=... '
+              '--dart-define=FIREBASE_PROJECT_ID=... '
+              '--dart-define=FIREBASE_AUTH_DOMAIN=... '
+              '--dart-define=FIREBASE_STORAGE_BUCKET=... '
+              '--dart-define=FIREBASE_MEASUREMENT_ID=...',
             ),
           ],
         ),
@@ -92,9 +259,7 @@ class _StudentsTable extends StatelessWidget {
     final topics = AppState.topics;
 
     if (students.isEmpty) {
-      return const Center(
-        child: Text('No hay alumnos registrados todavía.'),
-      );
+      return const Center(child: Text('No hay alumnos registrados todavía.'));
     }
 
     final table = DataTable(
@@ -142,9 +307,7 @@ class _StudentsTable extends StatelessWidget {
           constraints: BoxConstraints(
             minWidth: MediaQuery.of(context).size.width - 96,
           ),
-          child: SingleChildScrollView(
-            child: table,
-          ),
+          child: SingleChildScrollView(child: table),
         ),
       ),
     );
@@ -307,7 +470,9 @@ class _AdminStats extends StatelessWidget {
         Expanded(
           child: Card(
             color: scheme.primaryContainer,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -337,7 +502,9 @@ class _AdminStats extends StatelessWidget {
         Expanded(
           child: Card(
             color: scheme.secondaryContainer,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -345,8 +512,9 @@ class _AdminStats extends StatelessWidget {
                 children: [
                   Text(
                     'Mejor desempeño',
-                    style:
-                        TextStyle(color: scheme.onSecondaryContainer.withOpacity(0.8)),
+                    style: TextStyle(
+                      color: scheme.onSecondaryContainer.withOpacity(0.8),
+                    ),
                   ),
                   const SizedBox(height: 8),
                   if (topStudent != null)

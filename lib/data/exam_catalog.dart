@@ -17,6 +17,7 @@ class ExamCatalogEntry {
 class ExamCatalog {
   static const String assetM1ExamId = 'm1_pdf_mayo2023';
   static const String assetM1ExamFebId = 'm1_pdf_feb2023';
+  static const String agustinGuideExamId = 'agustin_custom_guia';
   static const String paesM1ExamId = 'paes_m1_textual';
 
   static const Map<String, ExamCatalogEntry> _entries = {
@@ -32,6 +33,14 @@ class ExamCatalog {
       title: 'Ensayo M1 · Febrero 2023',
       description: 'Nueva versión digitalizada para reforzar la preparación con el temario de verano.',
       questionCount: 65,
+      usesAssets: true,
+    ),
+    agustinGuideExamId: ExamCatalogEntry(
+      id: agustinGuideExamId,
+      title: 'Guía 44 · Combinatoria y Muestreo',
+      description:
+          'Material de entrenamiento exclusivo para Agustín Hermosilla basado en combinatoria y muestreo.',
+      questionCount: 30,
       usesAssets: true,
     ),
     paesM1ExamId: ExamCatalogEntry(
